@@ -1609,6 +1609,19 @@ static void gui_main(int *argc, char ***argv) {
 /* ================================================================
  * Audio-Gerät auswählen (gemeinsam CLI + GUI)
  * ================================================================ */
+static int audio_dev_index(char devs[][64], int nd, const char *name) {
+    for (int i=0;i<nd;i++) if (!strcmp(devs[i],name)) return i;
+    return -1;
+}
+
+/* Eine Zahl von stdin; leere Zeile oder Unsinn -> Vorgabe (Enter übernimmt sie). */
+static int read_dev_choice(int def, int nd) {
+    char line[32];
+    if (!fgets(line,sizeof(line),stdin)) return def;
+    int v; if (sscanf(line,"%d",&v)!=1 || v<0 || v>=nd) return def;
+    return v;
+}
+
 static void select_audio_device(void) {
     char devs[16][64];
     int  nd = alsa_list_devices(devs,16);
@@ -1618,17 +1631,22 @@ static void select_audio_device(void) {
         strncpy(CFG.audio_playback,devs[0],63);
         return;
     }
-    /* Mehrere Geräte: User muss wählen (CLI-Auswahl) */
+    /* Gespeicherte Geräte, die es noch gibt, gelten ohne Nachfrage. */
+    int ci = audio_dev_index(devs,nd,CFG.audio_capture);
+    int pi = audio_dev_index(devs,nd,CFG.audio_playback);
+    if (ci>=0 && pi>=0) return;
+    /* Mehrere Geräte, keine gültige Auswahl gespeichert: User wählt (CLI-Auswahl) */
     if (!use_gui) {
+        int def = audio_dev_index(devs,nd,"default"); if (def<0) def=0;
+        if (ci<0) ci=def;
+        if (pi<0) pi=def;
         printf("Verfügbare Audiogeräte:\n");
         for (int i=0;i<nd;i++) printf("  %d: %s\n",i,devs[i]);
-        printf("Aufnahme [0]: "); fflush(stdout);
-        int ci=0; if(scanf("%d",&ci)!=1) ci=0;
-        if(ci<0||ci>=nd) ci=0;
+        printf("Aufnahme [%d]: ",ci); fflush(stdout);
+        ci = read_dev_choice(ci,nd);
         strncpy(CFG.audio_capture,devs[ci],63);
-        printf("Wiedergabe [0]: "); fflush(stdout);
-        int pi=0; if(scanf("%d",&pi)!=1) pi=0;
-        if(pi<0||pi>=nd) pi=0;
+        printf("Wiedergabe [%d]: ",pi); fflush(stdout);
+        pi = read_dev_choice(pi,nd);
         strncpy(CFG.audio_playback,devs[pi],63);
     }
     /* GUI: Auswahl erfolgt im Konfig-Dialog */
