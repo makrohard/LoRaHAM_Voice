@@ -509,7 +509,7 @@ static int alsa_list_devices(char devs[][64], int max) {
         char *ioid = snd_device_name_get_hint(*h,"IOID");
         /* Nur Geräte die Capture können, oder keine Einschränkung */
         if (name && (!ioid||!strcmp(ioid,"Input")||!strcmp(ioid,""))) {
-            strncpy(devs[n],name,63); n++;
+            strncpy(devs[n],name,63); devs[n][63]='\0'; n++;  /* strncpy terminiert lange Namen nicht */
         }
         if (name) free(name);
         if (ioid) free(ioid);
