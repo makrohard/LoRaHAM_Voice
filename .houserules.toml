@@ -1,0 +1,21 @@
+# The house-rules profile of this C repository, for LoRaHAM Pi Control's tools/check_houserules.py
+# (`check_houserules.py <base>..<head>`, run in this repository). The checker reads it at <base>,
+# so a range cannot relax its own rules. Attribution, markers and the HARD patterns are the
+# checker's own and apply as in every repository.
+
+# The tests: every C file tests/test_*.c is one layer; each `expect("…", …)` line is one test.
+layers = [["tests/", "c"]]
+test_files = ["test_*.c"]
+test_def = '^\s*expect\("'
+
+# No module budgets: the checker measures modules as Python (ast), which a C source is not.
+budget_file = ""
+family_dir = ""
+
+changelog = "CHANGELOG.md"
+
+# In added test lines: a sleep that would decide an outcome (H3), and a network call (the tests
+# use local UNIX sockets only).
+[warn_patterns]
+sleep = '\b(u|nano)?sleep\s*\('
+network = '\b(getaddrinfo|gethostbyname|AF_INET6?)\b'
