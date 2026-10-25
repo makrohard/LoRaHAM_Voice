@@ -53,6 +53,21 @@ Voice options:
      ./loraham_voice        (Auto: GUI wenn DISPLAY gesetzt)
      ./loraham_voice --cli   (CLI erzwingen)
      ./loraham_voice --gui   (GUI erzwingen)
+     ./loraham_voice --data-socket PATH --conf-socket PATH
+     ./loraham_voice --help
+
+## Usage
+`--data-socket PATH` and `--conf-socket PATH` give the daemon's data and CONF socket. A given path is used as is; without
+it, the socket of `active_band` is used, as before (`/run/loraham/lora433.sock` if it exists, else `/tmp/lora433.sock`;
+`loraconf433.sock` and the 868 names alike). With either option the band is fixed by its sockets: the band toggle in the
+settings is off, and `active_band` only selects the LoRa parameter set, so give the band of those sockets. An empty or
+missing path, a path of 108 bytes or more and an unknown argument are refused with exit 1. That includes GTK's own
+options such as `--display=:0`: the GUI finds its display through `DISPLAY` or `WAYLAND_DISPLAY`, as before.
+
+If the daemon is not reachable at start, the app says so and does not connect later: start the daemon, then the app.
+
+Tests: `./run_tests.sh` (needs the build packages above; no display, terminal or audio device), and the GUI's band
+combo test `xvfb-run -a ./run_tests.sh gui` (needs a display: Xvfb).
  
 Example:
 
@@ -143,6 +158,15 @@ Voice Optionen:
      ./loraham_voice        (Auto: GUI wenn DISPLAY gesetzt)
      ./loraham_voice --cli   (CLI erzwingen)
      ./loraham_voice --gui   (GUI erzwingen)
+     ./loraham_voice --data-socket PFAD --conf-socket PFAD
+     ./loraham_voice --help
+
+`--data-socket` und `--conf-socket` geben den Daten- und den CONF-Socket des Daemons vor; ohne sie gilt der Socket von
+`active_band` wie bisher. Mit einer der beiden Optionen ist das Band durch die Sockets fest: der Band-Wechsel in den
+Einstellungen ist aus. Ein leerer oder fehlender Pfad, ein Pfad ab 108 Bytes und ein unbekanntes Argument enden mit
+Exit 1, auch GTK-eigene Optionen wie `--display=:0` (das Display kommt wie bisher aus `DISPLAY` oder
+`WAYLAND_DISPLAY`). Ist der Daemon beim Start nicht erreichbar, meldet die App das und verbindet sich nicht später neu: erst den
+Daemon, dann die App starten.
 
 Beispiel:
 

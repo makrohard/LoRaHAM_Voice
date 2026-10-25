@@ -33,6 +33,8 @@
  * Starten:  ./loraham_voice        (Auto: GUI wenn DISPLAY gesetzt)
  *           ./loraham_voice --cli   (CLI erzwingen)
  *           ./loraham_voice --gui   (GUI erzwingen)
+ *           ./loraham_voice --data-socket PATH --conf-socket PATH
+ *                                   (Daemon-Sockets fest vorgeben; --help)
  */
 
 /* ============================================================
@@ -463,13 +465,29 @@ static const char *loraham_sockpath(const char *runp, const char *tmpp) {
     struct stat st;
     return (stat(runp, &st) == 0 && S_ISSOCK(st.st_mode)) ? runp : tmpp;
 }
-static int sockets_connect(void) {
-    const char *dsock = CFG.active_band
+/* --data-socket / --conf-socket: a path given on the command line is used as is
+ * for every open of that socket; without it each open takes the band's default
+ * above, exactly as before. With either option the instance's band is fixed by
+ * its sockets, so the runtime band toggle is off (band_fixed()). */
+static const char *g_data_socket_opt = NULL;
+static const char *g_conf_socket_opt = NULL;
+
+static int band_fixed(void) { return g_data_socket_opt || g_conf_socket_opt; }
+static const char *data_sock_path(void) {
+    if (g_data_socket_opt) return g_data_socket_opt;
+    return CFG.active_band
         ? loraham_sockpath("/run/loraham/lora868.sock", "/tmp/lora868.sock")
         : loraham_sockpath("/run/loraham/lora433.sock", "/tmp/lora433.sock");
-    const char *csock = CFG.active_band
+}
+static const char *conf_sock_path(void) {
+    if (g_conf_socket_opt) return g_conf_socket_opt;
+    return CFG.active_band
         ? loraham_sockpath("/run/loraham/loraconf868.sock", "/tmp/loraconf868.sock")
         : loraham_sockpath("/run/loraham/loraconf433.sock", "/tmp/loraconf433.sock");
+}
+static int sockets_connect(void) {
+    const char *dsock = data_sock_path();
+    const char *csock = conf_sock_path();
     data_fd = connect_unix(dsock);
     if (data_fd<0) return 0;
     fcntl(data_fd, F_SETFL, fcntl(data_fd,F_GETFL,0)|O_NONBLOCK);
@@ -944,7 +962,8 @@ static void cfg_get_val(int f, char *buf, int sz) {
     char fs[20];
     switch(f){
     case  0: strncpy(buf,CFG.callsign,sz); break;
-    case  1: snprintf(buf,sz,"%s",CFG.active_band?"868 MHz":"433 MHz"); break;
+    case  1: snprintf(buf,sz,"%s%s",CFG.active_band?"868 MHz":"433 MHz",
+                 band_fixed()?" (fest)":""); break;
     case  2: snprintf(buf,sz,"%s",
                  CFG.codec_mode_idx<N_C2_MODES?
                  C2_MODES[CFG.codec_mode_idx].name:"?"); break;
@@ -987,7 +1006,7 @@ static int cfg_is_sel(int f){
 /* Auswahlfeld weiterschalten */
 static void cfg_cycle(int f){
     switch(f){
-    case  1: CFG.active_band=!CFG.active_band; break;
+    case  1: if (!band_fixed()) CFG.active_band=!CFG.active_band; break;  /* fest per Socket-Option */
     case  2: CFG.codec_mode_idx=(CFG.codec_mode_idx+1)%N_C2_MODES; break;
     case  3: CFG.duplex=!CFG.duplex; break;
     case  8: { int i=(bw_to_idx(CFG.lora433.bw)+1)%N_BW;
@@ -1366,6 +1385,16 @@ static void lp_from_dlg(LoRaP_t *lp,
     lp->ldro=gtk_combo_box_get_active(GTK_COMBO_BOX(ldf));
 }
 
+/* Band-Auswahl des Konfig-Dialogs; mit Socket-Option fest (nicht wählbar). */
+static GtkWidget *band_combo_new(void) {
+    GtkWidget *c_band=gtk_combo_box_text_new();
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(c_band),"433 MHz");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(c_band),"868 MHz");
+    gtk_combo_box_set_active(GTK_COMBO_BOX(c_band),CFG.active_band);
+    gtk_widget_set_sensitive(c_band,!band_fixed());   /* fest per Socket-Option */
+    return c_band;
+}
+
 static void gui_config_dialog(void) {
     ptt_in_config=1;
     GtkWidget *dlg=gtk_dialog_new_with_buttons(
@@ -1393,10 +1422,7 @@ static void gui_config_dialog(void) {
     gtk_entry_set_text(GTK_ENTRY(e_call),CFG.callsign);
     gtk_grid_attach(GTK_GRID(gen),e_call,1,r++,1,1);
     GL("Aktives Band:",r);
-    GtkWidget *c_band=gtk_combo_box_text_new();
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(c_band),"433 MHz");
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(c_band),"868 MHz");
-    gtk_combo_box_set_active(GTK_COMBO_BOX(c_band),CFG.active_band);
+    GtkWidget *c_band=band_combo_new();
     gtk_grid_attach(GTK_GRID(gen),c_band,1,r++,1,1);
     GL("Codec2-Modus:",r);
     GtkWidget *c_codec=gtk_combo_box_text_new();
@@ -1653,9 +1679,57 @@ static void select_audio_device(void) {
 }
 
 /* ================================================================
+ * Kommandozeile
+ * ================================================================ */
+static void voice_usage(FILE *f) {
+    fprintf(f, "usage: loraham_voice [--cli|--gui] [--data-socket PATH] [--conf-socket PATH]\n"
+               "  --cli / --gui       force the ncurses CLI or the GTK GUI (default: GUI with a display)\n"
+               "  --data-socket PATH  the daemon's raw data socket"
+               " (default: by active_band, /run/loraham/lora433.sock, else /tmp/lora433.sock; 868 alike)\n"
+               "  --conf-socket PATH  its CONF socket"
+               " (default: by active_band, /run/loraham/loraconf433.sock, else /tmp/loraconf433.sock)\n"
+               "  with either socket option the band is fixed: the band toggle is off\n"
+               "  -h, --help          this help\n");
+}
+
+/* 0 = go on, 1 = refused (reason + usage on stderr: exit 1), 2 = help shown (exit 0).
+ * --cli and --gui are known here and handled by main as before. */
+static int voice_parse_args(int argc, char **argv) {
+    for (int i = 1; i < argc; i++) {
+        const char *a = argv[i];
+        const char **target = NULL;
+        if (!strcmp(a, "-h") || !strcmp(a, "--help")) { voice_usage(stdout); return 2; }
+        if (!strcmp(a, "--cli") || !strcmp(a, "--gui")) continue;
+        if (!strcmp(a, "--data-socket"))      target = &g_data_socket_opt;
+        else if (!strcmp(a, "--conf-socket")) target = &g_conf_socket_opt;
+        if (!target) {
+            fprintf(stderr, "unknown argument: %s\n", a);
+            voice_usage(stderr);
+            return 1;
+        }
+        if (i + 1 >= argc || argv[i + 1][0] == '\0') {
+            fprintf(stderr, "%s needs a path\n", a);
+            voice_usage(stderr);
+            return 1;
+        }
+        if (strlen(argv[i + 1]) >= sizeof(((struct sockaddr_un *)0)->sun_path)) {
+            fprintf(stderr, "%s: path longer than 107 bytes: %s\n", a, argv[i + 1]);
+            voice_usage(stderr);
+            return 1;
+        }
+        *target = argv[++i];
+    }
+    return 0;
+}
+
+/* ================================================================
  * main()
  * ================================================================ */
+#ifndef LORAHAM_VOICE_NO_MAIN
 int main(int argc, char **argv) {
+    int pa = voice_parse_args(argc, argv);
+    if (pa == 2) return 0;
+    if (pa == 1) return 1;
     setlocale(LC_NUMERIC,"C");
     signal(SIGPIPE, SIG_IGN);  /* verhindert Absturz bei gebrochenem Socket */
     config_init_path(argv[0]);
@@ -1664,12 +1738,14 @@ int main(int argc, char **argv) {
 #ifdef NO_GTK
     use_gui = 0;   /* ohne GTK gebaut: immer ncurses-CLI (auch mit --gui) */
     for (int i=1;i<argc;i++) {
+        if (!strcmp(argv[i],"--data-socket")||!strcmp(argv[i],"--conf-socket")) { i++; continue; }  /* its operand is a path, not a UI token */
         if (!strcmp(argv[i],"--gui"))
             fprintf(stderr,"Hinweis: ohne GTK gebaut - starte CLI\n");
     }
 #else
     use_gui = (getenv("DISPLAY")!=NULL || getenv("WAYLAND_DISPLAY")!=NULL);
     for (int i=1;i<argc;i++) {
+        if (!strcmp(argv[i],"--data-socket")||!strcmp(argv[i],"--conf-socket")) { i++; continue; }  /* its operand is a path, not a UI token */
         if (!strcmp(argv[i],"--cli")) use_gui=0;
         if (!strcmp(argv[i],"--gui")) use_gui=1;
     }
@@ -1685,7 +1761,9 @@ int main(int argc, char **argv) {
 
     /* Sockets verbinden */
     if (!sockets_connect())
-        fprintf(stderr,"WARNUNG: Daemon nicht erreichbar – Reconnect im Hintergrund\n");
+        fprintf(stderr,"WARNUNG: Daemon nicht erreichbar (%s, %s) – kein Senden/Empfang; "
+                       "die App verbindet sich nicht neu: nach dem Start des Daemons neu starten\n",
+                data_sock_path(), conf_sock_path());
     else
         apply_lora_params();
 
@@ -1715,3 +1793,4 @@ int main(int argc, char **argv) {
     if (conf_fd>=0) close(conf_fd);
     return 0;
 }
+#endif /* LORAHAM_VOICE_NO_MAIN */

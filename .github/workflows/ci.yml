@@ -1,0 +1,21 @@
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libcodec2-dev libasound2-dev libncurses-dev libgtk-3-dev xvfb xauth
+      - name: GTK build (compile only)
+        run: cc -std=gnu11 -Wall -o /tmp/loraham_voice loraham_voice_v107.c $(pkg-config --cflags --libs gtk+-3.0) -lcodec2 -lasound -lncurses -lpthread -lm
+      - name: CLI build (-DNO_GTK)
+        run: cc -std=gnu11 -Wall -DNO_GTK -o /tmp/loraham_voice_cli loraham_voice_v107.c -lcodec2 -lasound -lncurses -lpthread -lm
+      - name: Tests
+        run: ./run_tests.sh
+      - name: GUI band test (GTK under xvfb)
+        run: xvfb-run -a ./run_tests.sh gui
